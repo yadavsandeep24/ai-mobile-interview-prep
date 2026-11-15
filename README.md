@@ -11,7 +11,7 @@ A 30-day curriculum for interviews on building AI features into mobile apps, cov
 | Concept (platform-agnostic) | 10 min |
 | Code, in **your** platform's track (🤖 Android · 🍎 iOS · 🐦 Flutter · ⚛️ React Native) | 10 min |
 | Mini system design | 5 min |
-| Mock interview questions (answer out loud) | 5 min |
+| Mock interview questions: answer out loud, then compare with the model answer | 5 min |
 
 Each lesson has code tracks for all four platforms. Do your main platform every day and skim the others: interviewers like candidates who can say "on iOS the equivalent is…".
 

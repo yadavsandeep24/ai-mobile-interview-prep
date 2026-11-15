@@ -221,17 +221,121 @@ export async function summarize(text: string, cloudModel: LanguageModel) {
 
 ## 4. Mock interview questions (5 min)
 
-Answer each out loud in about 60 seconds.
+Answer each out loud in about 60 seconds **before** opening the model answer. Then compare: did you cover the same structure, the trade-offs and a concrete example?
 
-1. When would you choose a cloud model over an on-device model? Give a real example.
-2. How would you handle a device that doesn't support Gemini Nano or Apple Intelligence?
-   <details><summary>Hint</summary>Check availability at runtime, fall back to the cloud (or use <code>PREFER_ON_DEVICE</code> in Firebase AI Logic), degrade the UI gracefully, and never assume the OS model exists.</details>
-3. Your app's AI feature costs $40k a month in API calls. What do you do?
-   <details><summary>Hint</summary>Caching, on-device for simple tasks, smaller models, prompt trimming, rate limiting, spend caps. On iOS, Private Cloud Compute is free for qualifying small apps.</details>
-4. A user complains that the AI feature drains their battery. How do you investigate?
-5. *(2026)* When would you choose built-in hybrid routing (Firebase AI Logic modes, iOS 27 Language Model protocol) over your own router?
-6. *(Cross-platform)* In Flutter or React Native, how do you give users the same on-device AI behavior on iOS and Android?
-   <details><summary>Hint</summary>Ship the same open model (flutter_gemma / llama.rn / ExecuTorch) on both platforms for identical behavior, or call each OS model (Foundation Models / Gemini Nano) through native code and accept different quality. Trade-offs: app size and model download versus consistency, and device coverage.</details>
+### Q1. When would you choose a cloud model over an on-device model? Give a real example.
+
+<details>
+<summary><b>Model answer</b></summary>
+
+**Structure:** capability → coverage → consistency, then mitigate the downsides.
+
+- **When the task is beyond small models:** long-context reasoning, up-to-date world knowledge, complex multi-step generation, or high-stakes accuracy. On-device models (~3B parameters) are good at summarizing, rewriting and classifying, and weak at knowledge and deep reasoning.
+- **When coverage matters:** the feature must work on *every* device, not just flagships with Gemini Nano or Apple Intelligence.
+- **When consistency and fast iteration matter:** one model to evaluate, and it can be swapped server-side without an app release.
+
+**Example:** in a travel app, *"plan a 5-day itinerary from this 20-page PDF using live prices"* goes to the cloud (long context, fresh data, reasoning). *"Summarize this notification"* stays on the device.
+
+**Mitigations I'd mention:** call through my backend or Firebase with App Check (no API keys in the app), send the minimum data, get consent when personal data leaves the device, and set timeouts and a fallback for offline users.
+
+</details>
+
+### Q2. How would you handle a device that doesn't support Gemini Nano or Apple Intelligence?
+
+<details>
+<summary><b>Model answer</b></summary>
+
+**Detect, tier, degrade gracefully.**
+
+1. **Detect at runtime:** ML Kit `checkStatus()` on Android, `SystemLanguageModel.default.availability` on iOS. Never assume the model exists; users can turn off Apple Intelligence, and models can be evicted.
+2. **Tier the device:** OS model ready → downloadable (prefetch on Wi-Fi) → cloud only.
+3. **Fall back based on the data:**
+   - Non-sensitive: route to the cloud (Firebase `PREFER_ON_DEVICE` does this automatically).
+   - Sensitive (for example, E2E-encrypted messages): use a small custom model (LiteRT / Core AI), or **hide the feature** rather than silently sending the data to the cloud.
+4. **UX:** never block core flows. On iOS, if the reason is `appleIntelligenceNotEnabled`, you can suggest enabling it.
+5. **Measure:** log the tier as an analytics dimension and test on low-end devices in CI or a device farm.
+
+</details>
+
+### Q3. Your app's AI feature costs $40k a month in API calls. What do you do?
+
+<details>
+<summary><b>Model answer</b></summary>
+
+**Measure first, then cut the biggest drivers, without letting quality drop.**
+
+1. **Measure:** a cost dashboard per feature, per user and per prompt. Usually 1–2 call sites drive most of the spend.
+2. **Avoid calls:** cache identical or semantically similar requests. Debounce triggers (don't call on every keystroke). Generate only when the user asks.
+3. **Move work on-device:** simple tasks (classify, short summaries, rewrites) go to Gemini Nano / Foundation Models, which cost nothing per call.
+4. **Route by complexity:** a small, cheap model by default, and the large model only for hard requests.
+5. **Shrink tokens:** shorter system prompts, prompt/prefix caching, summarize or trim chat history, cap output tokens, ask for structured output instead of prose.
+6. **Guardrails:** per-user rate limits, Firebase spend caps and budget alerts. On iOS, Private Cloud Compute is free for qualifying small-business apps.
+7. **Validate:** run evals before and after each change, so you know quality didn't regress.
+
+**Close with a number:** "Caching plus moving the two simplest features on-device would likely cut 50–70% of the bill. I'd confirm that with the dashboard."
+
+</details>
+
+### Q4. A user complains that the AI feature drains their battery. How do you investigate?
+
+<details>
+<summary><b>Model answer</b></summary>
+
+**Reproduce → profile → find the cause → fix → prevent.**
+
+- **Profile:**
+  - 🤖 Android Studio Power Profiler, Perfetto system traces, Battery Historian.
+  - 🍎 Instruments (Power Profiler / Energy), MetricKit field data.
+  - 🐦⚛️ The same native tools on the host app, plus Flutter DevTools or the React Native profiler for UI-thread work.
+- **Usual causes:**
+  - Inference on the **CPU** instead of the GPU/NPU (a missing delegate or acceleration).
+  - **Reloading the model** on every request instead of keeping it warm.
+  - AI running **in the background** too often, wake locks.
+  - Network retry storms or long-held streaming connections.
+  - A model that is too big (not quantized).
+- **Fixes:** hardware acceleration, a quantized model, load once and unload when the app is backgrounded, batch background work under *charging + idle* constraints (WorkManager / BGProcessingTask), throttle triggers, cache results.
+- **Thermal:** watch `PowerManager.getCurrentThermalStatus()` / `ProcessInfo.thermalState`, and back off or route to the cloud when the device is hot.
+- **Prevent:** add energy metrics to release health dashboards and alert on regressions.
+
+</details>
+
+### Q5. *(2026)* When would you choose built-in hybrid routing (Firebase AI Logic modes, iOS 27 Language Model protocol) over your own router?
+
+<details>
+<summary><b>Model answer</b></summary>
+
+**Built-in routing** when:
+- The task is simple and **single-turn** (Firebase's on-device mode supports only single-turn text, or text plus one image).
+- The vendor's cloud model is fine (Gemini through Firebase; any Language Model provider on iOS 27).
+- You want less code to maintain and you get App Check, model download handling and updates for free.
+
+**My own router** when:
+- I need **multi-turn chat** on-device.
+- I use a **different cloud provider**, or several.
+- I need **custom rules**: route by data sensitivity, confidence score, per-user cost budget, or subscription tier.
+- It's a **Flutter/React Native** app that needs the same logic on both platforms (Firebase hybrid is a native Android feature).
+- I need detailed telemetry or A/B testing of routing strategies.
+
+**Good line:** "Start with the built-in modes behind my own `TextSummarizer` interface. If the requirements outgrow them, I replace the implementation without touching the UI."
+
+</details>
+
+### Q6. *(Cross-platform)* In Flutter or React Native, how do you give users the same on-device AI behavior on iOS and Android?
+
+<details>
+<summary><b>Model answer</b></summary>
+
+**Two options. Choose based on what matters more: consistency or footprint.**
+
+| | A. Ship one open model | B. Use each OS model |
+|---|---|---|
+| How | flutter_gemma / llama.rn / ExecuTorch with the **same model file** (for example, a quantized Gemma) on both platforms | Platform channels / native modules to Gemini Nano and Foundation Models |
+| ✅ | Identical outputs; one prompt set and one eval suite; works on more devices | No download; OS-optimized (NPU); better battery use; free |
+| ❌ | Download of a few hundred MB to GBs, RAM limits on low-end phones, you handle model updates and licenses | Different quality and behavior per platform; flagship-only coverage; two native integrations |
+
+**What I'd do:** if consistency is a product requirement (for example, extraction that feeds the backend), choose **A**, downloaded on demand over Wi-Fi with a RAM check for tiering. If it's an assistive feature (rewrite, summarize), choose **B** and keep the outputs loosely specified. Either way, hide it behind one Dart or TypeScript interface, so you can switch later and fall back to the cloud.
+
+</details>
 
 ---
 
