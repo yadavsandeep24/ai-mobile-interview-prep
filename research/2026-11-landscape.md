@@ -1,4 +1,4 @@
-# Mobile AI Landscape & Hiring Requirements (researched Nov 15, 2026)
+# Mobile AI Landscape & Hiring Requirements: Android · iOS · Flutter · React Native (researched Nov 15, 2026)
 
 This file is the basis for the curriculum. It should be refreshed every couple of months, because these APIs change quickly.
 
@@ -42,18 +42,76 @@ At I/O 2026, Google said Android is moving **"from an operating system to an int
 
 ---
 
-## 2. iOS: what to know even as an Android developer
+## 2. iOS (iOS 27, WWDC June 8, 2026; generally available this fall)
 
-- **Foundation Models framework** (iOS 26) gives Swift access to Apple's ~3B on-device model, with guided generation (`@Generable`) and a `Tool` protocol. It's free, works offline and keeps data private.
-- **WWDC 2026 / iOS 27** (June 8, 2026; generally available this fall) adds **image input**, **server models via Private Cloud Compute** (reportedly free under 2M users), custom skills, Dynamic Profiles, and next-generation Apple Foundation Models **built in collaboration with Google Gemini**.
-- **Core AI framework** runs your own models (replacing the older Core ML approach). The **Evaluations framework** tests AI features.
-- **Xcode 27** adds agentic coding.
+Verified against [Apple's "What's new in iOS 27"](https://developer.apple.com/ios/whats-new/).
 
-**How the platforms map:** Foundation Models ≈ ML Kit Prompt API · Tool protocol ≈ function calling / AppFunctions · Private Cloud Compute ≈ Firebase AI Logic cloud fallback · Core AI ≈ LiteRT.
+| API | What it does |
+|---|---|
+| **Foundation Models framework** | A Swift API for Apple's on-device model (~3B parameters, introduced in iOS 26). Core types are `SystemLanguageModel` (check `.availability`), `LanguageModelSession`, `@Generable` structs (guided/structured generation) and the `Tool` protocol (tool calling). Free and works offline |
+| **iOS 27: any model** | The framework now works with *"any language model, including Apple Foundation Models, cloud models like Claude and Gemini, or any provider that conforms to the Language Model protocol"*. One API covers on-device and cloud |
+| **iOS 27: multimodal** | Pass images with text. Built-in vision tools (OCR, barcode) the model can call on-device |
+| **iOS 27: Dynamic Profiles** | Swap models, tools and instructions within one session |
+| **iOS 27: Private Cloud Compute** | Next-generation Apple Foundation Models (built with Google Gemini) in the cloud, **at no API cost** for Small Business Program apps with under 2M first-time downloads |
+| **Core AI** (new) | Load, specialize and run **your own models** on-device. Memory-safe Swift, AOT compilation, zero-copy paths. Converts PyTorch models. It is the iOS counterpart to LiteRT |
+| **Evaluations framework** (new) | Tests AI behavior "beyond what unit tests can catch". Supports prompt hill-climbing and agentic app evaluations |
+| **App Intents / Siri** | **Intent schemas** (Siri acts on your content with no phrases to define), **entity schemas** (feed the Spotlight semantic index), **View Annotations API** (Siri understands what's on screen), and an **App Intents Testing framework** |
+| **Tooling** | `fm` CLI + Python SDK for prototyping prompts. Instruments support for agentic apps |
+
+**Interview angle:** App Intents is Apple's equivalent of Android's AppFunctions. Both let the *system agent* drive your app.
 
 ---
 
-## 3. What companies are asking for
+## 3. Flutter
+
+| Tool | What it does | Maturity |
+|---|---|---|
+| **Firebase AI Logic** (`firebase_ai`) | The recommended way to call cloud Gemini from Dart. Proxied, with App Check | Stable. The old `google_generative_ai` Dart SDK is **no longer developed** |
+| **Flutter AI Toolkit** | Drop-in chat widgets (`LlmChatView`) with streaming, voice, attachments and function calling, over a swappable `LlmProvider` | 1.0 (uses `firebase_ai` 3.x) |
+| **GenUI SDK** (`genui`, `genui_firebase_ai`) | The model composes **real Flutter widgets**. Flutter's counterpart to A2UI | Alpha / experimental |
+| **flutter_gemma** (community) | Runs Gemma and other LLMs on-device (Android, iOS, web, desktop). Supports vision, audio, function calling, embeddings and RAG | Community-maintained |
+| **Dart & Flutter MCP server** | Lets AI coding agents understand and run your Flutter project | Available |
+| **Platform channels** | Reach Gemini Nano (ML Kit) or Apple Foundation Models through native code | DIY |
+
+**Typical 2026 stack:** Firebase AI Logic for cloud, flutter_gemma for cross-platform on-device inference, the AI Toolkit for chat UI, and GenUI only for prototypes. **Watch out:** Firebase ML custom model hosting is deprecated and shuts down **June 15, 2027**.
+
+**Interview angle:** "Firebase's built-in hybrid inference is Android-native. How do you get identical on-device behavior on iOS and Android in Flutter?" Answer: flutter_gemma with the same model on both, *or* platform channels to each OS model, accepting that the two OS models behave differently.
+
+---
+
+## 4. React Native
+
+| Tool | What it does | Notes |
+|---|---|---|
+| **Vercel AI SDK** (`ai`) | A unified `generateText` / `streamText` / tool API across providers | The standard abstraction in TypeScript |
+| **React Native AI** (Callstack, `@react-native-ai/*`) | AI SDK providers for on-device runtimes: `apple()` (Foundation Models, iOS 26+) and llama.rn (GGUF) | Lets you switch on-device and cloud by changing one line |
+| **React Native ExecuTorch** (Software Mansion) | Runs PyTorch-exported `.pte` models (Llama 3.2, Qwen 3, SmolLM, Whisper) through a `useLLM` hook | RN 0.83+ / Expo SDK 55+, iOS 17+, Android minSdk 26 |
+| **llama.rn** | llama.cpp bindings for GGUF models | Community |
+| **Expo** | On-device AI needs a **development build**, because Expo Go can't load the native code. An `expo-ai` package exposing the OS models (Apple FM / Gemini Nano) has been proposed | Check its status |
+
+**Pitfalls reported in late 2026** (from community sources, so verify): React Native AI providers implement AI SDK **v6**, so pin `ai@6` rather than `ai@latest` (7.x).
+
+**Interview angle:** model files are large, so ship them as on-demand downloads rather than in the bundle. Run inference off the JS thread (the native module handles this), and stream tokens to the UI without re-rendering the whole list.
+
+---
+
+## 5. Cross-platform concept map (use this in answers)
+
+| Concept | Android | iOS | Flutter | React Native |
+|---|---|---|---|---|
+| OS on-device LLM | Gemini Nano (ML Kit Prompt API) | Foundation Models | Platform channel / flutter_gemma | `@react-native-ai/apple`, ExecuTorch |
+| Custom model runtime | LiteRT / LiteRT-LM | Core AI | flutter_gemma, TFLite plugins | ExecuTorch, llama.rn |
+| Cloud LLM | Firebase AI Logic | Firebase AI Logic / FM with cloud provider / PCC | `firebase_ai` | Vercel AI SDK |
+| Hybrid routing | Firebase hybrid modes | Foundation Models Language Model protocol + Dynamic Profiles | Custom router | AI SDK provider swap |
+| Structured output | ML Kit Structured Output | `@Generable` | JSON schema | `generateObject` + zod |
+| System agent integration | AppFunctions (Android MCP) | App Intents (intent/entity schemas) | Native code per OS | Native modules per OS |
+| Generative UI | A2UI Compose renderer | — (SwiftUI from structured output) | GenUI SDK | AI SDK streaming UI |
+| Streaming primitive | `Flow` | `AsyncSequence` | `Stream` | async iterators |
+| Evaluation | Custom / Firebase | Evaluations framework | Custom | Custom |
+
+---
+
+## 6. What companies are asking for
 
 Common requirements in 2026 Android job postings that mention AI:
 
@@ -63,6 +121,11 @@ Common requirements in 2026 Android job postings that mention AI:
 4. **On-device ML.** ML Kit and TFLite/LiteRT. Postings differ in how much they stress on-device versus cloud.
 5. **Mobile-specific LLM concerns.** API key security, prompt reliability, **token cost**, battery, offline use and latency.
 6. **Daily AI tool use.** Interviewers ask "How do you use AI in your daily workflow?" (for example, at CI&T).
+
+**Flutter and React Native postings:**
+- AI-assisted coding tools (Claude, Copilot and similar) are expected almost everywhere. One analysis estimates only about 15% of mobile postings require *building* AI features, but nearly all expect you to *use* AI tools.
+- Roles that do require AI ask for **shipped** LLM features: RAG pipelines, OpenAI/Anthropic API integration, local LLMs, agents, and speech/voice APIs. "Real product work, not personal experiments."
+- Cross-platform roles often pair React Native or Flutter with React/Next.js on the web, and Jest, Playwright or Flutter Test for testing.
 
 ### What interviews look like
 - **AI-assisted coding rounds.** Meta reportedly runs a round where you solve problems *with* AI tools. Practice narrating how you prompt, verify and correct the AI.
@@ -79,6 +142,16 @@ Common requirements in 2026 Android job postings that mention AI:
 ---
 
 ## Sources
+
+**iOS:** [Apple: What's new in iOS 27](https://developer.apple.com/ios/whats-new/) · [iOS 27 Apple Intelligence framework decision guide](https://chatforest.com/builders-log/ios-27-apple-intelligence-framework-decision-guide-wwdc-2026/) · [Core AI vs Foundation Models vs MLX](https://andrew.ooo/answers/apple-core-ai-vs-foundation-models-vs-mlx-ios-27-framework-june-2026/) · [Foundation Models in iOS 27 opens to other models](https://www.o2ods.com/en/blog/foundation-models-in-ios-27-apple-opens-its-framework-to-other-ai-models/)
+
+**Flutter:** [Flutter AI Toolkit docs](https://docs.flutter.dev/ai/ai-toolkit) · [Hybrid AI in Flutter: on-device + cloud routing](https://medium.com/@denisov.shureg/hybrid-ai-in-flutter-routing-between-on-device-and-cloud-models-954da8f25373) · [GenUI + Firebase AI in Flutter](https://flutterfever.com/genui-firebase-ai-flutter/) · [Flutter AI with Gemini and the Dart MCP server](https://ecorpit.com/flutter-ai-features-gemini-dart-mcp-2026/) · [Flutter trends 2026](https://www.monterail.com/blog/flutter-development-trends) · [Flutter Gems: LLM packages](https://fluttergems.dev/chatgpt-llm-genai/)
+
+**React Native:** [Callstack React Native AI (GitHub)](https://github.com/callstackincubator/ai) · [react-native-ai.dev](https://www.react-native-ai.dev/) · [On-device AI in RN, late 2026: one AI SDK call, two engines](https://dev.to/praveensingh/on-device-ai-in-react-native-late-2026-one-ai-sdk-call-two-engines-measured-5455) · [Xybrid vs llama.rn vs RN ExecuTorch](https://www.xybrid.ai/blog/react-native-on-device-llm) · [On-device AI with Expo](https://dev.to/saidkaban/on-device-ai-in-react-native-with-expo-local-llm-speech-to-text-vision-fully-local-agents-57ld) · [WWDC26 and an Expo AI runtime](https://www.stewmore.dev/blog/announcing-expo-ai-runtime)
+
+**Cross-platform hiring:** [AI-assisted dev tops mobile skill demands](https://interviewstack.io/blog/how-ai-is-changing-mobile-developer-2026) · [Akra Tech Flutter/RN posting](https://freehire.me/jobs/flutter-react-native-developer-akra-tech-vuqnzxdv) · [WORKSDELIGHT Android & Flutter posting](https://vibehackers.io/jobs/android-flutter-developer-worksdelight-4) · [Djinni listings](https://djinni.co/jobs/) · [Flutter vs RN 2026](https://www.bidev.dev/blog/flutter-vs-react-native-2026) · [Hiring guide: React Native developers](https://hiredevelopers.com/hire-react-native-developers/)
+
+**Android & general:**
 - [Top AI on Android updates from Google I/O '26 (Android Developers Blog)](https://developer.android.com/blog/posts/top-ai-on-android-updates-for-building-intelligent-experiences-from-google-i-o-26)
 - [What's new in intelligent apps at the Android Developer Summit (Nov 5, 2026)](https://developer.android.com/blog/posts/android-intelligence-system-in-app-agents-ads)
 - [Agentic and Flexible: A next era of Android development (Oct 28, 2026)](https://developer.android.com/blog/posts/build-it-your-way-a-next-era-of-android-development)
