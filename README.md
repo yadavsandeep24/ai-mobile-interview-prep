@@ -21,7 +21,7 @@ Revised on Nov 15, 2026 from [current platform news and job requirements](resear
 
 ### Week 1: Foundations & the platform stacks
 - [x] [Day 1: On-device vs cloud AI (and hybrid inference)](days/day-01-on-device-vs-cloud.md)
-- [ ] Day 2: The 2026 landscape across all four platforms (concept map)
+- [x] [Day 2: The 2026 landscape across all four platforms (concept map)](days/day-02-landscape-2026.md)
 - [ ] Day 3: 🤖 Android on-device: ML Kit, Gemini Nano 4 Prompt API, LiteRT
 - [ ] Day 4: 🍎 iOS on-device: Foundation Models (`@Generable`, `Tool`), Core AI, Private Cloud Compute
 - [ ] Day 5: 🐦 Flutter AI stack: `firebase_ai`, AI Toolkit, flutter_gemma, platform channels
