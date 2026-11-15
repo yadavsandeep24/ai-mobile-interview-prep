@@ -208,16 +208,142 @@ export async function summarize(text: string, cloudModel: LanguageModel) {
 
 ## 3. Mini system design (5 min)
 
-**Prompt:** *"Design a feature that auto-tags photos in a gallery app."*
+**Prompt:** *"Design a feature that auto-tags photos in a gallery app, so users can search for things like 'dog', 'beach' or 'receipt'."*
+
+> **How to use this:** spend 5 minutes sketching your own answer, then read the model answer **out loud**. It follows the structure interviewers expect: **Clarify → Estimate → High-level design → Deep dives → Trade-offs → Failure modes & metrics → Wrap-up**. Then practice the follow-up questions; that's where senior candidates stand out.
 
 <details>
-<summary>Sample answer</summary>
+<summary><b>🎤 Model answer (say it to the interviewer)</b></summary>
 
-- **On-device**: ML Kit image labeling / LiteRT on Android, the Vision framework / Core AI on iOS, and the same engines through plugins or native modules in Flutter and React Native. The reasons: photos are private, there are thousands of them (cloud calls would be expensive), and the feature should work offline.
-- **Batch processing** in the background with constraints (charging, idle) to protect the battery: `WorkManager` on Android, `BGProcessingTask` on iOS, wrapped by a background-task plugin in Flutter or React Native.
-- **Store tags locally** (Room / SwiftData / drift / SQLite) and index them for search.
-- **Optional cloud step** for rich captions, opt-in only, with consent UX.
+#### Step 1: Clarify requirements (~2 min)
+> "Before I design anything, I'd like to clarify scope."
+
+| I ask | Assume |
+|---|---|
+| Platforms? | iOS + Android (I'll call out cross-platform differences) |
+| Library size? | Typical user has 5k–50k photos; power users 200k+ |
+| Tags only, or captions and faces too? | Object/scene **tags** for search. Faces are out of scope (privacy/regulatory) |
+| Offline? Privacy expectations? | Must work offline; photos are personal, so **no upload by default** |
+| How fresh? | New photos searchable within minutes; backfill of the old library can take days |
+
+**Functional:** tag new photos and the existing library, search by tag, show tags on the photo.
+**Non-functional:** private, battery-friendly, no UI jank, works on low-end devices.
+
+#### Step 2: Key decision and estimates
+> "The biggest decision is **where the model runs**. 50k photos × a cloud vision call at around $0.001 is about $50 per user just for backfill, plus uploading gigabytes of personal photos. So on-device is the clear default."
+
+- On-device labeling takes ~20–50 ms per image on the GPU, so **50k photos ≈ 20–40 minutes of compute**. That needs to be spread across idle and charging windows.
+- Index size: ~10 tags × 50k photos = 500k rows. Small enough for SQLite.
+
+#### Step 3: High-level architecture
+
+```
+┌──────────────┐   new photo    ┌──────────────────┐
+│ Media store  │ ─────────────▶ │ Change observer  │
+│ (Photos lib) │                │ (MediaStore /    │
+└──────────────┘                │  PHPhotoLibrary) │
+                                └────────┬─────────┘
+                                         ▼ enqueue IDs
+┌────────────────────────────────────────────────────┐
+│ Tagging queue (persisted)                          │
+│  priority: new photos > recent > old backfill      │
+└────────┬───────────────────────────────────────────┘
+         ▼ background job (charging + idle for backfill)
+┌───────────────────┐   ┌───────────────────────────┐
+│ Image loader      │──▶│ Labeler (on-device)       │
+│ downscale 224–512 │   │ ML Kit / LiteRT / Vision  │
+└───────────────────┘   └────────────┬──────────────┘
+                                     ▼ tags + confidence
+                        ┌───────────────────────────┐
+                        │ Local DB (Room/SwiftData) │
+                        │ photo_tags + FTS index    │
+                        └────────────┬──────────────┘
+                                     ▼
+                        ┌───────────────────────────┐
+                        │ Search UI (synonyms map)  │
+                        └───────────────────────────┘
+```
+
+#### Step 4: Deep dives
+1. **Model choice:**
+   - 🤖 ML Kit Image Labeling (~400 labels, no training) to start. A custom LiteRT model if we need domain labels such as "receipt", "whiteboard" or "screenshot".
+   - 🍎 Vision framework classification, or Core AI for a custom model.
+   - 🐦⚛️ ML Kit plugins or native modules; the business logic stays in Dart or TypeScript.
+2. **Scheduling:**
+   - New photos: process on the next app open or as a short background task.
+   - Backfill: 🤖 `WorkManager` with `requiresCharging + requiresDeviceIdle`, 🍎 `BGProcessingTask` with `requiresExternalPower`.
+   - Process in **batches of ~200**, and checkpoint progress so a killed job resumes.
+3. **Data model:** `photo_tags(photo_id, tag, confidence, model_version)`, with an index on `tag`.
+   - Store `model_version`, so upgrading the model triggers **re-tagging** in the background.
+   - Use a **confidence threshold** (~0.6) for search, and keep lower scores for "maybe" results.
+4. **Search quality:** a synonym map ("pup" → dog), plural and locale handling, and optionally on-device text embeddings later (Day 20).
+
+#### Step 5: Trade-offs
+| Option | Pros | Cons |
+|---|---|---|
+| ML Kit generic labels | Zero training, small | Generic vocabulary |
+| Custom LiteRT / Core AI model | Domain labels | Training, maintenance, size |
+| Cloud vision | Best quality, captions | Cost, privacy, upload bandwidth |
+| On-device LLM captions (Nano/FM) | Rich descriptions | Slow per image, limited devices. Use only for an opt-in "describe" feature |
+
+#### Step 6: Failure modes, privacy, metrics
+- **Failures:** OOM on huge images (always downscale), thermal throttling (pause when hot), process death (checkpoints), deleted photos (cascade delete).
+- **Privacy:** nothing leaves the device. Make it explicit in the UI ("Tags are created on your phone").
+- **Metrics:** % of library tagged, search success rate (search → photo opened), battery cost per 1k photos, crash/ANR rate in the tagging job.
+
+#### Step 7: Wrap-up (30 sec)
+> "To summarize: on-device labeling for privacy and cost, a prioritized persistent queue so new photos are fast and the backfill runs on charge, tags stored with confidence and model version in a local indexed DB, and a search layer with synonyms. Next I'd add custom labels and embeddings for semantic search."
+
 </details>
+
+### 🔁 Likely follow-up questions
+
+**F1. A new model version is 10% more accurate. How do you roll it out to 100M users who already have tagged libraries?**
+
+<details>
+<summary>Answer</summary>
+
+Ship it behind a remote-config flag, or as an on-demand model download (AI pack / background download). Tags carry `model_version`, so re-tag lazily: new photos first, then the backfill on charge. **Evaluate on a golden set** before rollout, roll out in stages (1% → 10% → 100%), and watch search-success and battery metrics. Keep the old tags until the new ones are written, so search never goes empty.
+
+</details>
+
+**F2. Users want natural-language search like 'my dog at the beach last summer'. How does the design change?**
+
+<details>
+<summary>Answer</summary>
+
+Add **on-device image embeddings** (a CLIP-style model through LiteRT / Core AI, or the ML Kit Embeddings API for text) and store the vectors locally. Embed the query text and do nearest-neighbor search, combined with **metadata filters** (date, location from EXIF) parsed from the query, possibly with a small on-device LLM or structured output. Vector storage: 50k × 512 floats ≈ 100 MB in float32, so **quantize to int8** (≈25 MB).
+
+</details>
+
+**F3. How do you keep the UI smooth while tagging runs in the foreground?**
+
+<details>
+<summary>Answer</summary>
+
+Run inference on a dedicated background thread or dispatcher (the single-thread LiteRT rule), never on Main. Throttle work while the user scrolls the gallery, downscale off-thread, and reuse buffers to avoid GC pressure. In Flutter use an isolate or native plugin; in React Native the native module keeps it off the JS thread.
+
+</details>
+
+**F4. Would you ever use the cloud here?**
+
+<details>
+<summary>Answer</summary>
+
+Only **opt-in**: for example a 'smart captions' or 'memories' feature, with clear consent and E2E-encrypted backup. Or **server-side tagging for photos already in our cloud backup**, where the user has already uploaded them. That reuses existing data, avoids extra uploads and saves device battery.
+
+</details>
+
+**F5. How do you test this?**
+
+<details>
+<summary>Answer</summary>
+
+Unit-test the queue, scheduler and DB logic with a fake labeler (the interface pattern from Day 1). Run a **golden image set** in instrumented tests per model version (precision/recall per tag). Run battery and performance tests on low-end devices in a device farm. Monitor in production with analytics on tag coverage and search success.
+
+</details>
+
+---
 
 ## 4. Mock interview questions (5 min)
 

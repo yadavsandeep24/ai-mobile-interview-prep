@@ -174,23 +174,133 @@ export function useAiTier(checkOnDevice: () => Promise<'ready' | 'pending' | 'no
 
 **Prompt:** *"Add AI 'smart reply' suggestions to a messaging app that ships on iOS and Android."* Answer it twice: once assuming **native** apps and once assuming **Flutter or React Native**.
 
+> **How to use this:** spend 5 minutes sketching your own answer, then read the model answer **out loud**. It follows the structure interviewers expect: **Clarify → Estimate → High-level design → Deep dives → Trade-offs → Failure modes & metrics → Wrap-up**. Then practice the follow-up questions; that's where senior candidates stand out.
+
 <details>
-<summary>Sample answer</summary>
+<summary><b>🎤 Model answer (say it to the interviewer)</b></summary>
 
-**Requirements:** suggestions in under 300 ms, privacy (messages may be end-to-end encrypted), works offline, and low cost at scale (billions of messages).
+#### Step 1: Clarify requirements (~2 min)
 
-**This should be on-device first:**
-- E2E-encrypted content **should not go to a cloud model**, which rules out the cloud as the default path.
-- Tier A: OS model. 🤖 ML Kit Prompt API (Gemini Nano) and 🍎 Foundation Models with a `@Generable struct Replies { var options: [String] }` for structured output.
-- Tier B/C: a small custom model (LiteRT / Core AI), or **hide the feature**. Don't silently send E2E-encrypted messages to the cloud.
+| I ask | Assume |
+|---|---|
+| Are chats end-to-end encrypted? | **Yes**, and this drives everything |
+| Where do suggestions appear? | 3 chips above the keyboard after an incoming message |
+| Latency target? | Under ~300–500 ms after the message arrives or the chat opens |
+| Languages? | Top 10 to start |
+| Scale? | 100M DAU, billions of messages per day |
 
-**Native vs cross-platform:**
-- *Native:* use each OS model directly; it's the best quality and has no download.
-- *Flutter/RN:* either (a) platform channels or native modules to each OS model (no download, but iOS and Android behave differently), or (b) ship one open model through flutter_gemma / llama.rn / ExecuTorch (the same behavior everywhere, but a model download of a few hundred MB and RAM limits).
+**Functional:** 3 short, relevant replies; tap to send or edit.
+**Non-functional:** privacy (E2E), low latency, zero marginal cost, no jank, safe (no offensive suggestions).
 
-**System agent tie-in (2026 bonus):** expose a `sendMessage` tool through **AppFunctions** (Android) and **App Intents** (iOS), so "Text Sam I'm running late" works from Gemini or Siri. Android's guidance prefers on-device Android MCP over remote MCP when E2E encryption is involved.
+#### Step 2: Key decision
+> "Because chats are E2E-encrypted, **the server can't read messages**. Sending them to a cloud LLM would break the E2E promise. So suggestions must be generated **on-device**. At billions of messages a day, cloud inference would also cost a fortune."
 
-**Production:** a short context window (last N messages), prefix caching for the instructions, debouncing, discarding stale suggestions when a new message arrives, and tracking which suggestions users accept to measure quality.
+#### Step 3: High-level architecture
+
+```
+Incoming msg ─▶ Chat repository ─▶ Debounce (latest msg wins)
+                                        │
+                                        ▼
+                         ┌────────────────────────────┐
+                         │ SmartReplyEngine (iface)   │
+                         └───────┬───────────┬────────┘
+                    Tier A       │           │    Tier B/C
+          ┌──────────────────────▼──┐   ┌────▼────────────────────┐
+          │ OS LLM                  │   │ Small custom model      │
+          │ 🤖 Gemini Nano (ML Kit) │   │ (LiteRT / Core AI)      │
+          │ 🍎 Foundation Models    │   │ or feature hidden       │
+          └──────────────┬──────────┘   └────┬────────────────────┘
+                         ▼ structured output: Replies(options[3])
+                  ┌──────────────────────────┐
+                  │ Safety filter + dedupe   │
+                  └────────────┬─────────────┘
+                               ▼
+                      Suggestion chips (UI)
+```
+
+#### Step 4: Deep dives
+1. **Prompting and context:**
+   - Send only the last ~6–10 messages (stays well within Nano's ~4K input limit).
+   - A short system instruction ("3 replies, max 6 words each, match the user's language and tone").
+   - **Structured output:** `@Generable Replies { options: [String] }` on both 🤖 and 🍎.
+2. **Latency:**
+   - Prefetch and `warmup()` the model when the chat list opens.
+   - Generate as soon as the message arrives, before the user opens the chat.
+   - **Cancel stale requests** when a newer message arrives (Flow `collectLatest` / Swift `Task` cancellation).
+   - Cache suggestions per message ID.
+3. **Device tiers:**
+   - Tier A: OS model.
+   - Tier B: a small custom model (a classic smart-reply ranker over a fixed reply set, a few MB).
+   - Tier C: hide the feature. **Never fall back to the cloud for E2E content.**
+4. **Native vs cross-platform:**
+   - *Native:* use each OS model directly; best quality, no download.
+   - *Flutter/RN, option A:* platform channels / native modules to each OS model. No download, but quality differs per platform.
+   - *Flutter/RN, option B:* one open model (flutter_gemma / llama.rn / ExecuTorch) for identical behavior, but a few hundred MB to download and RAM limits.
+   - **My choice:** option A for an assistive feature like this, behind one Dart or TS interface.
+5. **System agent bonus:** expose `sendMessage` through **AppFunctions (Android MCP)** and **App Intents**, so "Text Sam I'm late" works from Gemini or Siri. Google recommends local Android MCP for E2E journeys.
+
+#### Step 5: Trade-offs
+| Choice | Why |
+|---|---|
+| On-device over cloud | E2E privacy and cost. Lose some quality |
+| Structured output over free text | Reliable parsing. Slightly slower |
+| Hide on Tier C rather than cloud fallback | Keeps the privacy promise. Lower coverage |
+
+#### Step 6: Failure modes, safety, metrics
+- **Safety:** a blocklist + classifier on suggestions, no suggestions in sensitive contexts (grief, conflict detection), never auto-send.
+- **Failures:** quota errors → skip silently; model not ready → no chips (never block typing).
+- **Metrics:** **suggestion acceptance rate** (the main metric), edit-before-send rate, latency p50/p95, battery impact. All logged **without message content** (privacy-safe analytics).
+
+#### Step 7: Wrap-up
+> "On-device generation because of E2E encryption, OS models with structured output on capable devices, a small fallback model or no feature elsewhere, aggressive prefetching and cancellation for latency, safety filtering, and acceptance rate as the success metric. Cross-platform, I'd wrap the OS models behind one interface rather than ship a large model."
+
+</details>
+
+### 🔁 Likely follow-up questions
+
+**F1. How do you improve suggestion quality if you can't see any messages?**
+
+<details>
+<summary>Answer</summary>
+
+Use **privacy-preserving signals**: acceptance and edit rates per prompt variant (no content), A/B test prompts, and **on-device personalization** (learn the user's style locally). For model improvement, **federated learning** or opt-in donated data; evaluate offline on public or synthetic chat datasets.
+
+</details>
+
+**F2. The OS model update changed behavior and acceptance dropped 15% overnight. What do you do?**
+
+<details>
+<summary>Answer</summary>
+
+Gemini Nano and Foundation Models are updated **by the OS, not by us**. Detect it by segmenting metrics by model version. Respond by adjusting prompts or examples via **remote config** (no app release), and temporarily lower exposure if needed. Prevent it by running an **eval suite against preview models** (AICore Developer Preview / iOS betas) before rollouts.
+
+</details>
+
+**F3. How do you avoid suggestions in the wrong language or tone?**
+
+<details>
+<summary>Answer</summary>
+
+Detect the conversation language on-device (ML Kit Language ID / NaturalLanguage framework) and put it in the instruction. Include the user's own recent messages as tone examples. Validate the output language and drop mismatched suggestions.
+
+</details>
+
+**F4. What changes for group chats?**
+
+<details>
+<summary>Answer</summary>
+
+Include sender names in the context, cap the context more aggressively, suggest only when the user is directly addressed or the message is a question, and lower the frequency to avoid noise.
+
+</details>
+
+**F5. How would you test this?**
+
+<details>
+<summary>Answer</summary>
+
+Unit-test the engine with a fake model. Golden conversation sets for each language with expected properties (length, language, safety) rather than exact strings. Performance tests on low-end devices. A staged rollout with acceptance and latency dashboards.
+
 </details>
 
 ---

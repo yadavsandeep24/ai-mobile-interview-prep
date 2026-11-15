@@ -195,27 +195,119 @@ class Classifier(ctx: Context, env: Environment) : AutoCloseable {
 
 **Prompt:** *"Design an on-device 'scan a receipt → categorized expense' feature for an Android expense app."*
 
+> **How to use this:** spend 5 minutes sketching your own answer, then read the model answer **out loud**. It follows the structure interviewers expect: **Clarify → Estimate → High-level design → Deep dives → Trade-offs → Failure modes & metrics → Wrap-up**. Then practice the follow-up questions; that's where senior candidates stand out.
+
 <details>
-<summary><b>Sample answer</b></summary>
+<summary><b>🎤 Model answer (say it to the interviewer)</b></summary>
 
-**Pipeline:**
-1. **CameraX** capture → **ML Kit Text Recognition** (classic, on-device, works on all devices) → raw text.
-2. **Gemini Nano + structured output**: a `@Generable data class Expense(merchant, date, total, currency, category)`, with `@Guide` descriptions and an enum-like list of categories. `temperature = 0` for consistency.
-3. **Validate** in code: total > 0, a parseable date, a known currency. If invalid → let the user edit, or retry once.
-4. Save to **Room**. Sync later with **WorkManager**.
+#### Step 1: Clarify requirements (~2 min)
 
-**Why this split:** OCR is a solved perception problem (ML Kit classic). Understanding messy receipt text is a generative task (Nano).
+| I ask | Assume |
+|---|---|
+| What fields? | Merchant, date, total, currency, category (one of ~10) |
+| Accuracy bar? | The user confirms before saving, so it's assistive, but the total must be right ≥95% of the time |
+| Offline? | Yes, people scan in restaurants and on travel |
+| Privacy? | Receipts may include partial card numbers and locations, so on-device preferred |
+| Volume? | A few scans per user per day; spikes at month-end |
 
-**Fallbacks:**
-- Nano `UNAVAILABLE` → cloud extraction (Firebase AI Logic) **with consent**, since receipts can contain card digits. Otherwise use a **rules-based parser** plus manual entry.
-- OCR text over the token limit → keep only the lines with prices and the header and footer.
+#### Step 2: Key decision
+> "This is two problems: **perception** (reading text from a photo) and **understanding** (turning messy text into fields). Perception is solved on all devices by ML Kit Text Recognition. Understanding is a generative task, ideal for Gemini Nano with **structured output**, with fallbacks for devices without Nano."
 
-**Performance:**
-- Prefetch Nano at onboarding and call `warmup()` when the camera screen opens.
-- If the categorization instructions are long, put them in a **prefix cache** (text only, so it applies to the OCR text, not the image).
-- Show the OCR result immediately; the structured result fills in afterwards.
+#### Step 3: High-level architecture
 
-**Privacy:** fully on-device on Tier A devices, which is a strong selling point.
+```
+CameraX ─▶ Image (auto-crop, deskew)
+              │
+              ▼
+   ML Kit Text Recognition (on-device, all devices)
+              │ raw text + line boxes
+              ▼
+   Text pre-filter (keep header, price lines, totals; under 4K tokens)
+              │
+              ▼
+   ┌─────────────────────────────────────────┐
+   │ ExpenseExtractor (interface)            │
+   │  Tier A: Gemini Nano + @Generable       │
+   │  Tier B: rules/regex parser             │
+   │  Tier C: cloud (Firebase AI Logic,      │
+   │          opt-in consent)                │
+   └───────────────┬─────────────────────────┘
+                   ▼ Expense(merchant, date, total, currency, category)
+         Validator (total > 0, date parse, currency ISO, category ∈ enum)
+                   │ invalid → retry once → fallback / user edit
+                   ▼
+   Review screen (prefilled, editable) ─▶ Room ─▶ WorkManager sync
+```
+
+#### Step 4: Deep dives
+1. **Structured output:** `@Generable data class Expense(...)` with `@Guide` descriptions. Category as an enum-like constrained list. `temperature = 0` and a fixed `seed` for consistency. Check `isStructuredOutputFeatureAvailable()`.
+2. **Prompt efficiency:** the categorization rules and few-shot examples (~800 tokens) are static, so put them in a **prefix cache** (text-only, which works here because we send OCR text, not the image). Google's Pixel 9 numbers suggest roughly 2 s → 0.5 s.
+3. **Perceived latency:** show the OCR text and a skeleton form immediately, then fill fields as the extraction completes. `warmup()` when the camera opens. Prefetch the Nano download during onboarding.
+4. **Validation and trust:** never trust the LLM. Cross-check the extracted total against the largest currency amount near the word "TOTAL" in the OCR text. Highlight low-confidence fields for the user.
+5. **Learning:** if the user changes a category, store a merchant → category mapping locally and apply it next time before calling the model (cheaper and more accurate).
+
+#### Step 5: Trade-offs
+| Option | Pros | Cons |
+|---|---|---|
+| OCR + Nano (chosen) | Private, offline, free | Nano only on supported devices |
+| Multimodal Nano (image directly) | One step | No prefix cache with images; less controllable |
+| Cloud document AI | Highest accuracy, all devices | Cost, privacy, needs network |
+| Pure regex | Works everywhere | Brittle across receipt formats |
+
+#### Step 6: Failure modes and metrics
+- **Failures:** blurry photo (detect low OCR confidence → "retake"), long receipts over the token limit (pre-filter), quota errors (queue and retry), structured parse failure (retry, then rules).
+- **Metrics:** field accuracy (did the user edit the total, date or category?), scan-to-save time, % on Tier A vs fallbacks, retake rate.
+
+#### Step 7: Wrap-up
+> "ML Kit OCR for perception on every device, Gemini Nano with structured output for extraction, prefix caching for speed, strict validation plus user review for trust, rules or opt-in cloud as fallbacks, and edit rates as the quality metric."
+
+</details>
+
+### 🔁 Likely follow-up questions
+
+**F1. How would this work on iOS, or in Flutter or React Native?**
+
+<details>
+<summary>Answer</summary>
+
+🍎 VisionKit / Vision for OCR plus **Foundation Models with `@Generable`**: the same architecture. 🐦 the `google_mlkit_text_recognition` plugin plus OS models through platform channels, with one Dart `ExpenseExtractor` interface. ⚛️ an ML Kit / Vision native module plus `@react-native-ai/apple` on iOS, and llama.rn or a native Nano module on Android.
+
+</details>
+
+**F2. Receipts in Japanese, Arabic and German. What changes?**
+
+<details>
+<summary>Answer</summary>
+
+Use the right ML Kit text recognizer script model (Latin, Japanese and others), detect the language, handle locale-specific number and date formats in the **validator** (1.234,56 vs 1,234.56), and include the locale in the prompt. Evaluate per locale with golden sets.
+
+</details>
+
+**F3. Finance wants 99.5% accuracy on totals. Can you get there?**
+
+<details>
+<summary>Answer</summary>
+
+Not with the LLM alone. Combine: deterministic total extraction from OCR (regex near the TOTAL keyword) **cross-checked** with the LLM. When they agree, auto-accept; when they disagree, ask the user. Measure precision on auto-accepted results separately. That's how you hit the bar with human-in-the-loop for the rest.
+
+</details>
+
+**F4. How do you handle a user who scans 50 receipts at month-end?**
+
+<details>
+<summary>Answer</summary>
+
+Batch mode: capture fast, queue extraction in the background (WorkManager, foreground service with progress for big batches), respect the AICore **per-app quota** with backoff, and show a review list as results arrive.
+
+</details>
+
+**F5. What would you log, given the privacy constraints?**
+
+<details>
+<summary>Answer</summary>
+
+Field-level **edit flags** (was the total edited? yes/no), latency, tier, error codes and model version. **No receipt text or images.** Use opt-in diagnostics for debugging specific failures.
+
 </details>
 
 ---
