@@ -23,7 +23,7 @@ Revised on Nov 15, 2026 from [current platform news and job requirements](resear
 - [x] [Day 1: On-device vs cloud AI (and hybrid inference)](days/day-01-on-device-vs-cloud.md)
 - [x] [Day 2: The 2026 landscape across all four platforms (concept map)](days/day-02-landscape-2026.md)
 - [x] [Day 3: 🤖 Android on-device: ML Kit, Gemini Nano 4 Prompt API, LiteRT](days/day-03-android-on-device.md)
-- [ ] Day 4: 🍎 iOS on-device: Foundation Models (`@Generable`, `Tool`), Core AI, Private Cloud Compute
+- [x] [Day 4: 🍎 iOS on-device: Foundation Models (`@Generable`, `Tool`), Core AI, Private Cloud Compute](days/day-04-ios-on-device.md)
 - [ ] Day 5: 🐦 Flutter AI stack: `firebase_ai`, AI Toolkit, flutter_gemma, platform channels
 - [ ] Day 6: ⚛️ React Native AI stack: Vercel AI SDK, React Native AI, ExecuTorch, llama.rn, Expo dev builds
 - [ ] Day 7: Review + mock: "native vs cross-platform for an AI-heavy app"
